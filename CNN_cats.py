@@ -1,22 +1,32 @@
 import numpy as np
 import os
+import json
 from PIL import Image
 from tkinter import filedialog, messagebox
 
 class CNNDeepLearning:
     def __init__(self, input_size=(64, 64)):
         self.input_size = input_size
-        # Filtro fixo de detecção de bordas (ajuda já que não estamos treinando o kernel via backprop complexo)
-        self.kernel = np.array([[-1, -1, -1], [-1, 8, -1], [-1, -1, -1]]) * 0.1
+        # Kernel de detecção de bordas ligeiramente mais forte para realçar silhuetas
+        self.kernel = np.array([
+            [-1, -1, -1],
+            [-1,  8, -1],
+            [-1, -1, -1]
+        ])
         
+        # Cálculo do tamanho do vetor após Convolução (64-2=62) e Pooling (62/2=31)
+        # 31 * 31 = 961 entradas na camada densa
         self.flat_size = ((input_size[0] - 2) // 2) * ((input_size[1] - 2) // 2)
-        self.w_densa = np.random.randn(self.flat_size, 1) * 0.01
-        self.bias = 0
+        
+        # Inicialização de Xavier/Glorot simplificada para melhor convergência
+        self.w_densa = np.random.randn(self.flat_size, 1) * np.sqrt(1 / self.flat_size)
+        self.bias = 0.0
 
-    def relu(self, x): return np.maximum(0, x)
+    def relu(self, x): 
+        return np.maximum(0, x)
 
     def sigmoid(self, x):
-        return 1 / (1 + np.exp(-np.clip(x, -500, 500)))
+        return 1 / (1 + np.exp(-np.clip(x, -20, 20)))
 
     def convolucao(self, img):
         h, w = img.shape
@@ -35,12 +45,18 @@ class CNNDeepLearning:
                     saida[i//2, j//2] = np.max(img[i:i+2, j:j+2])
         return saida
 
-    def treinar_imagem(self, img_path, label, lr=0.01):
+    def preparar_imagem(self, img_path):
+        # Suporta qualquer tamanho e cor transformando em Escala de Cinza Padronizada
+        img = Image.open(img_path).convert('L').resize(self.input_size)
+        img_array = np.array(img) / 255.0
+        # Normalização extra: subtrair a média ajuda na convergência
+        return img_array - np.mean(img_array)
+
+    def treinar_imagem(self, img_path, label, lr=0.05): # Aumentei um pouco o learning rate
         try:
-            img = Image.open(img_path).convert('L').resize(self.input_size)
-            img_array = np.array(img) / 255.0
+            img_array = self.preparar_imagem(img_path)
             
-            # Forward
+            # Forward Pass
             c1 = self.convolucao(img_array)
             a1 = self.relu(c1)
             p1 = self.max_pooling(a1)
@@ -49,78 +65,81 @@ class CNNDeepLearning:
             z = np.dot(flattened.T, self.w_densa) + self.bias
             pred = self.sigmoid(z)
             
-            # Backpropagation (Simplificado para a camada densa)
+            # Backpropagation simplificado
             erro = pred - label
             self.w_densa -= lr * flattened * erro
-            self.bias -= lr * erro
+            self.bias -= lr * float(erro)
+            
             return float(np.abs(erro))
         except Exception as e:
             return None
 
-    def salvar_modelo(self):
-        np.save('modelo_pesos.npy', self.w_densa)
-        np.save('modelo_bias.npy', self.bias)
-        print("\n[INFO] Pesos salvos com sucesso!")
+    def salvar_modelo(self, filepath):
+        dados = {
+            "input_size": self.input_size,
+            "bias": float(self.bias),
+            "w_densa": self.w_densa.tolist()
+        }
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(dados, f, indent=4)
+        print(f"\n[INFO] Pesos salvos em JSON: {filepath}")
 
-    def carregar_modelo(self):
-        if os.path.exists('modelo_pesos.npy'):
-            self.w_densa = np.load('modelo_pesos.npy')
-            self.bias = np.load('modelo_bias.npy')
-            print("[INFO] Modelo carregado!")
+    def carregar_modelo(self, filepath):
+        if os.path.exists(filepath):
+            with open(filepath, 'r', encoding='utf-8') as f:
+                dados = json.load(f)
+            self.bias = float(dados["bias"])
+            self.w_densa = np.array(dados["w_densa"])
+            print(f"[INFO] Modelo JSON carregado!")
 
     def predizer(self, img_path):
-        img = Image.open(img_path).convert('L').resize(self.input_size)
-        img_array = np.array(img) / 255.0
+        img_array = self.preparar_imagem(img_path)
         c1 = self.convolucao(img_array)
-        p1 = self.max_pooling(self.relu(c1))
+        a1 = self.relu(c1)
+        p1 = self.max_pooling(a1)
         f = p1.flatten().reshape(-1, 1)
-        prob = self.sigmoid(np.dot(f.T, self.w_densa) + self.bias)
-        return prob[0][0]
+        z = np.dot(f.T, self.w_densa) + self.bias
+        return self.sigmoid(z)[0][0]
 
 # --- FLUXO DE EXECUÇÃO ---
 
-cnn = CNNDeepLearning()
+if __name__ == "__main__":
+    cnn = CNNDeepLearning()
+    path_json = "/home/marco-samuelsson/Documentos/BCC/Projeto-de-Conclusao-de-Curso/modelo_pesos.json"
 
-# print("--- FASE DE TREINAMENTO ---")
-# print("Selecione a pasta que contém apenas fotos de GATOS.")
-# dir_cats = filedialog.askdirectory(title="Pasta de GATOS", initialdir="/home/marco-samuelsson/Documentos/BCC/Projeto-de-Conclusao-de-Curso")
-# print("Selecione a pasta que contém fotos de OUTRAS COISAS (Cachorros, etc).")
-# dir_others = filedialog.askdirectory(title="Pasta de NÃO-GATOS", initialdir="/home/marco-samuelsson/Documentos/BCC/Projeto-de-Conclusao-de-Curso")
+    print("--- FASE DE TREINAMENTO ---")
+    dir_cats = filedialog.askdirectory(title="Pasta de GATOS", initialdir="/home/marco-samuelsson/Documentos/BCC/Projeto-de-Conclusao-de-Curso")
+    dir_others = filedialog.askdirectory(title="Pasta de NÃO-GATOS", initialdir="/home/marco-samuelsson/Documentos/BCC/Projeto-de-Conclusao-de-Curso")
 
-# if dir_cats and dir_others:
-#     epocas = 5  # Quantas vezes o modelo verá todo o conjunto de dados
-#     for epoca in range(epocas):
-#         erro_total = 0
-#         cont = 0
-#         print(f"\nIniciando Época {epoca+1}/{epocas}...")
-        
-#         # Treinar Gatos (Label 1)
-#         for arq in os.listdir(dir_cats):
-#             res = cnn.treinar_imagem(os.path.join(dir_cats, arq), label=1)
-#             if res is not None: 
-#                 erro_total += res
-#                 cont += 1
-        
-#         # Treinar Não-Gatos (Label 0)
-#         for arq in os.listdir(dir_others):
-#             res = cnn.treinar_imagem(os.path.join(dir_others, arq), label=0)
-#             if res is not None: 
-#                 erro_total += res
-#                 cont += 1
-        
-#         print(f"Erro médio da época: {erro_total/cont:.4f}")
+    extensoes_validas = ('.png', '.jpg', '.jpeg', '.bmp', '.webp')
 
-#     cnn.salvar_modelo()
-#     messagebox.showinfo("Sucesso", "Treinamento concluído!")
+    if dir_cats and dir_others:
+        epocas = 2 # Aumentado para 10 para melhor aprendizado
+        for epoca in range(epocas):
+            erro_total, cont = 0, 0
+            
+            # Unindo caminhos para iterar de forma equilibrada
+            dataset = [(dir_cats, 1), (dir_others, 0)]
+            for pasta, label in dataset:
+                for arq in os.listdir(pasta):
+                    if arq.lower().endswith(extensoes_validas):
+                        caminho = os.path.join(pasta, arq)
+                        if os.path.isfile(caminho):
+                            res = cnn.treinar_imagem(caminho, label)
+                            if res is not None:
+                                erro_total += res
+                                cont += 1
+            
+            if cont > 0:
+                print(f"Época {epoca+1}/{epocas} - Erro médio: {erro_total/cont:.4f}")
 
-# --- FASE DE TESTE ---
-print("\n--- FASE DE TESTE ---")
-teste_path = filedialog.askopenfilename(title="Selecione uma imagem para testar", 
-                                        initialdir="/home/marco-samuelsson/Documentos/BCC/Projeto-de-Conclusao-de-Curso")
+        cnn.salvar_modelo(path_json)
+        messagebox.showinfo("Sucesso", "Treino finalizado!")
 
-if teste_path:
-    cnn.carregar_modelo()
-    resultado = cnn.predizer(teste_path)
-    print(f"\nCaminho: {teste_path}")
-    print(f"Confiança: {resultado * 100:.2f}%")
-    print("Veredito:", "GATO" if resultado > 0.5 else "NÃO É GATO")
+    print("\n--- FASE DE TESTE ---")
+    teste_path = filedialog.askopenfilename(title="Selecione uma imagem para testar", initialdir="/home/marco-samuelsson/Documentos/BCC/Projeto-de-Conclusao-de-Curso")
+    if teste_path:
+        cnn.carregar_modelo(path_json)
+        prob = cnn.predizer(teste_path)
+        print(f"Confiança: {prob * 100:.2f}%")
+        print("Resultado:", "GATO" if prob > 0.5 else "NÃO É GATO")
