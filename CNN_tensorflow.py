@@ -1,57 +1,88 @@
+import numpy as np
 import tensorflow as tf
-
-from tensorflow.keras import datasets, layers, models
 import matplotlib.pyplot as plt
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense
+from tensorflow.keras.datasets import mnist
+from tensorflow.keras.utils import to_categorical
 
-(train_images, train_labels), (test_images, test_labels) = datasets.cifar10.load_data()
+# Load dataset
+(X_train, y_train), (X_test, y_test) = mnist.load_data()
 
-# Normalize pixel values to be between 0 and 1
-train_images, test_images = train_images / 255.0, test_images / 255.0
+# explore the data
+print(f"We have {len(X_train)} images in the training set and {len(X_test)} images in the test set.")
+print(f"The size of the images is {X_train[0].shape}.")
 
-class_names = ['airplane', 'automobile', 'bird', 'cat', 'deer',
-               'dog', 'frog', 'horse', 'ship', 'truck']
+X_train.shape, y_train.shape, X_test.shape, y_test.shape
 
-plt.figure(figsize=(10,10))
+# Display the first image in the dataset as a data matrix
+plt.imshow(X_train[0], cmap="gray")
+plt.xticks([])
+plt.yticks([])
+plt.grid(False)
+plt.show()
+
+# Display the values of each pixel in the image
+print("Pixel values:")
+for row in X_train[0]:
+    for pixel in row:
+        print("{:3}".format(pixel), end=" ")
+    print()
+
+# Display some sample images
+plt.figure(figsize=(10, 10))
 for i in range(25):
-    plt.subplot(5,5,i+1)
+    plt.subplot(5, 5, i + 1)
     plt.xticks([])
     plt.yticks([])
     plt.grid(False)
-    plt.imshow(train_images[i])
-    # The CIFAR labels happen to be arrays, 
-    # which is why you need the extra index
-    plt.xlabel(class_names[train_labels[i][0]])
+    plt.imshow(X_train[i], cmap=plt.cm.binary)
+    plt.xlabel(y_train[i])
 plt.show()
 
-model = models.Sequential()
-model.add(layers.Conv2D(32, (3, 3), activation='relu', input_shape=(32, 32, 3)))
-model.add(layers.MaxPooling2D((2, 2)))
-model.add(layers.Conv2D(64, (3, 3), activation='relu'))
-model.add(layers.MaxPooling2D((2, 2)))
-model.add(layers.Conv2D(64, (3, 3), activation='relu'))
+# Normalize data
+X_train = X_train / 255.0
+X_test = X_test / 255.0
+# Reshape to add channel dimension
+X_train = X_train.reshape(X_train.shape[0], 28, 28, 1)
+X_test = X_test.reshape(X_test.shape[0], 28, 28, 1)
+# One-hot encode labels
+y_train = to_categorical(y_train, 10)
+y_test = to_categorical(y_test, 10)
 
-model.summary()
+import tensorflow as tf
+from tensorflow.keras import layers
 
-model.add(layers.Flatten())
-model.add(layers.Dense(64, activation='relu'))
-model.add(layers.Dense(10))
+# create an input layer
+input_layer = tf.keras.layers.Input(shape=(28, 28, 1)) # 28x28 pixel images with a single color channel
 
-model.summary()
+# CNN model building
 
-model.compile(optimizer='adam',
-              loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
-              metrics=['accuracy'])
+model = tf.keras.Sequential([
+    input_layer, # input layer
+    layers.Conv2D(filters=10, kernel_size=(3, 3), activation='relu'), # convolutional layer
+    # filter is the number of filters we want to apply
+    # kernel is the size of window/filter moving over the image
+    layers.Conv2D(filters=10, kernel_size=(3, 3),  activation='relu'), # convolutional layer
+    layers.MaxPooling2D(), # pooling layer
 
-history = model.fit(train_images, train_labels, epochs=10, 
-                    validation_data=(test_images, test_labels))
+    layers.Conv2D(filters=10, kernel_size=(3, 3), activation='relu'), # convolutional layer
+    layers.Conv2D(filters=10, kernel_size=(3, 3), activation='relu'), # convolutional layer
+    layers.MaxPooling2D(), # pooling layer
 
-plt.plot(history.history['accuracy'], label='accuracy')
-plt.plot(history.history['val_accuracy'], label = 'val_accuracy')
-plt.xlabel('Epoch')
-plt.ylabel('Accuracy')
-plt.ylim([0.5, 1])
-plt.legend(loc='lower right')
+    layers.Flatten(), # flatten layer
+    layers.Dense(10, activation='softmax') # output layer # why did we add 10?
+])
 
-test_loss, test_acc = model.evaluate(test_images,  test_labels, verbose=2)
+model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
 
-print(test_acc)
+model.fit(X_train, y_train, validation_split=0.2, epochs=10, batch_size=64)
+
+loss, accuracy = model.evaluate(X_test, y_test)
+print(f"Test Accuracy: {accuracy * 100:.2f}%")
+
+model.save('cnn_mnist_model.h5')
+
+# To load the model:
+from tensorflow.keras.models import load_model
+loaded_model = load_model('cnn_mnist_model.h5')
